@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import * as fs from 'fs';
 import * as path from 'path';
-import { analyzeImageWithGemini, analyzeContextWithGemini } from '../services/geminiService';
+import { analyzeImageWithGemini, analyzeContextWithGemini } from '../services/aiService';
 import { searchWikipedia } from '../services/wikipediaService';
 import { calculateConfidence } from '../services/confidenceEngine';
 
@@ -29,7 +29,8 @@ router.post('/', async (req: Request, res: Response) => {
 
     // FASE 1: Análisis con Gemini Vision
     console.log('🤖 Analizando con Gemini...');
-    const geminiResult = await analyzeImageWithGemini(tempImagePath, ocrText);
+    const scanMode = (req.body.scanMode as 'standard' | 'advanced') || 'standard';
+    const geminiResult = await analyzeImageWithGemini(tempImagePath, ocrText, scanMode);
     console.log('✅ Gemini:', geminiResult.brand, geminiResult.model, `${geminiResult.confidence}%`);
 
     // FASE 2: Información adicional y análisis contextual en paralelo
