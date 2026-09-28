@@ -2,13 +2,14 @@ import axios from 'axios';
 import * as fs from 'fs';
 
 const MODELS = [
-  'google/gemini-2.5-flash-lite:free',
-  'google/gemini-2.5-flash:free',
-  'google/gemini-flash-1.5:free',
-  'meta-llama/llama-3.2-11b-vision-instruct:free',
+  'gemini-3.5-flash-lite',
+  'gemini-3.5-flash',
+  'gemini-3.6-flash',
+  'gemini-3.7-flash',
+  'gemini-3.8-flash',
 ];
 
-const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
+const BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
 
 export interface GeminiResult {
   objectType: string;
@@ -23,7 +24,9 @@ export interface GeminiResult {
 
 async function tryModel(modelName: string, base64Image: string, ocrText: string): Promise<GeminiResult> {
   const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error('API key no configurada');
+  if (!apiKey) throw new Error('GEMINI_API_KEY no configurada');
+
+  const url = `${BASE_URL}/${modelName}:generateContent?key=${apiKey}`;
 
   const prompt = `Identifica este objeto físico con precisión.
 
@@ -49,42 +52,31 @@ Responde SOLO con JSON válido sin markdown:
 Confianza: 90+ si ves marca Y modelo claramente. 70-89 si solo marca. 50-69 si es probable. Menos si es incierto.`;
 
   const response = await axios.post(
-    OPENROUTER_URL,
+    url,
     {
-      model: modelName,
-      messages: [
+      contents: [
         {
-          role: 'user',
-          content: [
+          parts: [
             {
-              type: 'image_url',
-              image_url: {
-                url: `data:image/jpeg;base64,${base64Image}`,
+              inline_data: {
+                mime_type: 'image/jpeg',
+                data: base64Image,
               },
             },
-            {
-              type: 'text',
-              text: prompt,
-            },
+            { text: prompt },
           ],
         },
       ],
-      max_tokens: 500,
-      temperature: 0.2,
-    },
-    {
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://nexus-scanner.app',
-        'X-Title': 'NEXUS Scanner',
+      generationConfig: {
+        temperature: 0.2,
+        maxOutputTokens: 500,
       },
-      timeout: 30000,
-    }
+    },
+    { timeout: 30000 }
   );
 
-  const rawText = response.data.choices[0].message.content;
-  console.log(`✅ Modelo ${modelName} respondió`);
+  const rawText = response.data.candidates[0].content.parts[0].text;
+  console.log(`✅ Modelo ${modelName} respondió correctamente`);
 
   const cleaned = rawText.replace(/```json|```/g, '').trim();
   const parsed = JSON.parse(cleaned);
@@ -123,7 +115,7 @@ export async function analyzeImageWithGemini(imagePath: string, ocrText: string)
     }
   }
 
-  throw new Error('Ningún modelo disponible en este momento');
+  throw new Error('Ningún modelo de Gemini está disponible. Verifica tu API key.');
 }
 
 export async function analyzeContextWithGemini(
@@ -135,6 +127,8 @@ export async function analyzeContextWithGemini(
 ): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return '';
+
+  const CONTEXT_MODELS = ['gemini-3.1-flash-lite', 'gemini-3.5-flash-lite', 'gemini-3.5-flash'];
 
   const prompt = `Eres un asistente experto que analiza objetos físicos y proporciona insights inteligentes.
 
@@ -154,31 +148,34 @@ Proporciona un ANÁLISIS CONTEXTUAL inteligente en español que incluya:
 
 Escribe máximo 3 oraciones en párrafo natural. Responde SOLO con el texto del análisis.`;
 
-  try {
-    const response = await axios.post(
-      OPENROUTER_URL,
-      {
-        model: 'google/gemini-2.5-flash-lite:free',
-        messages: [{ role: 'user', content: prompt }],
-        max_tokens: 300,
-        temperature: 0.4,
-      },
-      {
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-          'HTTP-Referer': 'https://nexus-scanner.app',
-          'X-Title': 'NEXUS Scanner',
+  for (const modelName of CONTEXT_MODELS) {
+    try {
+      const url = `${BASE_URL}/${modelName}:generateContent?key=${apiKey}`;
+      const response = await axios.post(
+        url,
+        {
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: 0.4,
+            maxOutputTokens: 300,
+          },
         },
-        timeout: 15000,
-      }
-    );
+        { timeout: 15000 }
+      );
 
-    const text = response.data.choices[0].message.content;
-    console.log('🧠 Análisis contextual generado');
-    return text.trim();
-  } catch (e: any) {
-    console.log('⚠️ Análisis contextual error:', e.message);
-    return '';
+      const text = response.data.candidates[0].content.parts[0].text;
+      console.log('🧠 Análisis contextual generado');
+      return text.trim();
+    } catch (e: any) {
+      const status = e.response?.status;
+      const msg = e.response?.data?.error?.message || e.message;
+      console.log(`⚠️ Análisis contextual error: ${status} — ${msg}`);
+      if (status === 503 || status === 429) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+      if (status !== 404 && status !== 503) return '';
+    }
   }
+
+  return '';
 }
