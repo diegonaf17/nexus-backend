@@ -140,7 +140,7 @@ export async function analyzeImageWithGemini(
   const imageBuffer = fs.readFileSync(imagePath);
   const base64Image = imageBuffer.toString('base64');
 
-  const model  = scanMode === 'advanced' ? 'gpt-4o' : 'gpt-4o-mini';
+  const model  = scanMode === 'advanced' ? 'gpt-6-sol' : 'gpt-6-luna';
   const prompt = scanMode === 'advanced' ? PROMPT_ADVANCED(ocrText) : PROMPT_STANDARD(ocrText);
 
   console.log(`🤖 Usando ${model} (modo ${scanMode})`);
@@ -155,7 +155,7 @@ export async function analyzeImageWithGemini(
     // Fallback: si falla gpt-4o intenta con gpt-4o-mini
     if (scanMode === 'advanced') {
       console.log('🔄 Fallback a gpt-4o-mini...');
-      return await callOpenAI(base64Image, PROMPT_STANDARD(ocrText), 'gpt-4o-mini');
+      return await callOpenAI(base64Image, PROMPT_STANDARD(ocrText), 'gpt-6-luna');
     }
 
     throw new Error(`Error de IA: ${message}`);
@@ -194,7 +194,7 @@ Escribe máximo 3 oraciones en párrafo natural. Responde SOLO con el texto del 
     const response = await axios.post(
       OPENAI_URL,
       {
-        model: 'gpt-4o-mini',
+        model: 'gpt-6-luna',
         messages: [{ role: 'user', content: prompt }],
         max_tokens: 300,
         temperature: 0.4,
