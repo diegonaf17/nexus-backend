@@ -31,6 +31,26 @@ app.get('/health', (req, res) => {
   });
 });
 
+// Manejador de errores global — evita que el servidor muera
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  console.error('❌ Error no manejado en Express:', err.message);
+  res.status(500).json({
+    success: false,
+    error: err.message || 'Error interno del servidor',
+  });
+});
+
+// Capturar errores async no capturados — evita crash del proceso
+process.on('uncaughtException', (err) => {
+  console.error('❌ uncaughtException:', err.message);
+  // No cerramos el proceso — el servidor sigue corriendo
+});
+
+process.on('unhandledRejection', (reason: any) => {
+  console.error('❌ unhandledRejection:', reason?.message || reason);
+  // No cerramos el proceso — el servidor sigue corriendo
+});
+
 // Iniciar servidor
 app.listen(PORT, () => {
   console.log('');
