@@ -1,4 +1,4 @@
-import { GeminiResult } from './geminiService';
+import { GeminiResult } from './aiService';
 import { WikiResult } from './wikipediaService';
 
 export interface ConfidenceResult {
