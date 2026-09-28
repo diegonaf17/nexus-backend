@@ -4,6 +4,9 @@ import * as fs from 'fs';
 const MODELS = [
   'gemini-3.5-flash-lite',
   'gemini-3.5-flash',
+  'gemini-3-flash',
+  'gemini-2.5-flash-lite',
+  'gemini-2.5-flash',
 ];
 
 const BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
@@ -104,6 +107,9 @@ export async function analyzeImageWithGemini(imagePath: string, ocrText: string)
       const message = error.response?.data?.error?.message || error.message;
       console.log(`⚠️  ${modelName} → status ${status}: ${message}`);
       if (status !== 404 && status !== 503 && status !== 429 && status !== 400) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+      if (status !== 404 && status !== 503 && status !== 429 && status !== 400) {
         throw error;
       }
     }
@@ -171,6 +177,9 @@ Responde SOLO con el texto del análisis.`;
       const status = e.response?.status;
       const msg = e.response?.data?.error?.message || e.message;
       console.log(`⚠️ Análisis contextual error: ${status} — ${msg}`);
+      if (status === 503 || status === 429) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
       if (status !== 404 && status !== 503) return '';
     }
   }

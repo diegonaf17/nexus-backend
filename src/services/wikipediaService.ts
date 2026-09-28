@@ -58,6 +58,9 @@ Responde SOLO con el JSON, sin markdown ni texto adicional.`;
     } catch (e: any) {
       const status = e.response?.status;
       console.log(`⚠️ Info adicional error: ${status}`);
+      if (status === 503 || status === 429) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
       if (status !== 404 && status !== 503) {
         return { found: false, title: '', summary: '', url: '' };
       }
