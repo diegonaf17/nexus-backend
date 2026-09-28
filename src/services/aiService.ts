@@ -92,7 +92,7 @@ async function callOpenAI(
               type: 'image_url',
               image_url: {
                 url: `data:image/jpeg;base64,${base64Image}`,
-                detail: model === 'gpt-4o' ? 'high' : 'low',
+                detail: model === 'gpt-6-sol' ? 'high' : 'low',
               },
             },
             {
@@ -102,7 +102,7 @@ async function callOpenAI(
           ],
         },
       ],
-      max_tokens: model === 'gpt-4o' ? 800 : 500,
+      max_completion_tokens: model === 'gpt-6-sol' ? 800 : 500,
       temperature: 0.2,
     },
     {
@@ -152,9 +152,8 @@ export async function analyzeImageWithGemini(
     const message = error.response?.data?.error?.message || error.message;
     console.log(`⚠️ ${model} error: ${status} — ${message}`);
 
-    // Fallback: si falla gpt-4o intenta con gpt-4o-mini
     if (scanMode === 'advanced') {
-      console.log('🔄 Fallback a gpt-4o-mini...');
+      console.log('🔄 Fallback a gpt-6-luna...');
       return await callOpenAI(base64Image, PROMPT_STANDARD(ocrText), 'gpt-6-luna');
     }
 
@@ -196,7 +195,7 @@ Escribe máximo 3 oraciones en párrafo natural. Responde SOLO con el texto del 
       {
         model: 'gpt-6-luna',
         messages: [{ role: 'user', content: prompt }],
-        max_tokens: 300,
+        max_completion_tokens: 300,
         temperature: 0.4,
       },
       {
