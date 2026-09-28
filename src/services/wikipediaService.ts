@@ -8,7 +8,12 @@ export interface WikiResult {
 }
 
 const BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
-const MODELS = ['gemini-3.5-flash-lite', 'gemini-3.5-flash'];
+const MODELS = [
+  'gemini-3.1-flash-lite',
+  'gemini-3.1-flash-lite-preview',
+  'gemini-3.5-flash-lite',
+  'gemini-3.5-flash',
+];
 
 export async function searchWikipedia(query: string): Promise<WikiResult> {
   const apiKey = process.env.GEMINI_API_KEY;
