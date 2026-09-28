@@ -1,0 +1,43 @@
+import express from 'express';
+import cors from 'cors';
+import dotenv from 'dotenv';
+import * as fs from 'fs';
+import scanRouter from './routes/scan';
+
+dotenv.config();
+
+const app  = express();
+const PORT = process.env.PORT || 3000;
+
+// Crear carpeta de uploads si no existe
+if (!fs.existsSync('uploads')) {
+  fs.mkdirSync('uploads');
+}
+
+// Middlewares
+app.use(cors());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Rutas
+app.use('/api/scan', scanRouter);
+
+// Health check
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'online',
+    service: 'NEXUS Backend',
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// Iniciar servidor
+app.listen(PORT, () => {
+  console.log('');
+  console.log('╔══════════════════════════════════╗');
+  console.log('║      NEXUS BACKEND  v1.0         ║');
+  console.log('║      Puerto: ' + PORT + '                  ║');
+  console.log('║      Estado: ONLINE              ║');
+  console.log('╚══════════════════════════════════╝');
+  console.log('');
+});
