@@ -21,17 +21,17 @@ ${ocrText ? `TEXTO VISIBLE EN LA IMAGEN: "${ocrText}"` : ''}
 
 INSTRUCCIONES:
 - Identifica marca, modelo y tipo de objeto
-- Describe el estado físico visible: si está vacío, lleno, roto, sucio, desgastado, nuevo
-- Concluye lo que el estado implica: "la botella está vacía, lo que indica que su contenido fue consumido", "el dispositivo muestra polvo acumulado, sugiere poco uso reciente"
-- Si no ves marca clara, describe el objeto por categoría y características visuales
-- Sé directo y útil, no uses frases como "no hay suficiente información"
+- Si no ves marca con texto claro, identifica por diseño, forma, distribución de botones o estilo visual. Usa "Similar a [marca conocida]" si el diseño es reconocible
+- Describe el estado físico visible: vacío, lleno, roto, sucio, desgastado, nuevo
+- Concluye lo que el estado implica: "la botella está vacía, lo que indica que su contenido fue consumido", "el dispositivo muestra polvo acumulado, sugiere poco uso reciente", "la esquina presenta fractura por impacto"
+- Sé directo y útil. Nunca escribas "no hay suficiente información" ni "no se puede determinar"
 
 Responde SOLO con JSON válido sin markdown ni texto adicional:
 {
   "objectType": "tipo de objeto específico",
-  "brand": "marca o Desconocida",
-  "model": "modelo o No identificado",
-  "description": "estado y conclusión breve, máximo 100 caracteres",
+  "brand": "marca exacta, Similar a [marca] si identificas por diseño, o Desconocida solo si no hay referencia posible",
+  "model": "modelo exacto, Similar a [modelo] si es inferido, o No identificado",
+  "description": "estado físico y conclusión directa, máximo 100 caracteres",
   "confidence": 0,
   "characteristics": {
     "estado_fisico": "descripción del estado visible y lo que implica",
@@ -44,7 +44,7 @@ Responde SOLO con JSON válido sin markdown ni texto adicional:
   ]
 }
 
-REGLAS: description máximo 100 caracteres. alternatives máximo 2 items. Confianza: 90+ marca Y modelo visibles. 70-89 solo marca. 50-69 probable. Menos si incierto.`;
+REGLAS: description máximo 100 caracteres. alternatives máximo 2 items. Confianza: 90+ marca Y modelo visibles con texto. 70-89 marca visible o diseño muy reconocible. 50-69 inferido por similitud. Menos si realmente incierto.`;
 
 // ─── SOL: Perito forense, razona en capas, detecta detalles finos ──────────────
 const PROMPT_ADVANCED = (ocrText: string) => `Eres un sistema de análisis forense visual de objetos físicos. Tu función es identificar con precisión máxima, razonar sobre lo que observas y emitir diagnósticos accionables.
@@ -53,24 +53,24 @@ ${ocrText ? `TEXTO VISIBLE EN LA IMAGEN: "${ocrText}"` : ''}
 
 PROCESO DE ANÁLISIS:
 1. LEE todo texto visible: etiquetas, números de modelo, serie, versiones, stickers, códigos
-2. IDENTIFICA marca y modelo exacto; si no hay marca visible, busca similitudes con productos conocidos por forma, materiales, conexiones o diseño
-3. EVALÚA el estado físico en detalle: zonas de desgaste, tipo de daño, acumulación de suciedad, componentes faltantes, signos de uso o abandono
-4. RAZONA sobre implicaciones: qué sugiere el estado observado, qué riesgos existen, qué acciones recomiendas
-5. DETECTA detalles técnicos si aplica: tipo de conexiones, materiales, componentes visibles, generación del producto
+2. IDENTIFICA marca y modelo exacto; si no hay marca visible, busca similitudes por forma, materiales, distribución de elementos, tipo de conexiones o estilo de diseño. Referencia productos conocidos
+3. EVALÚA el estado físico en detalle: localiza zonas específicas de desgaste, tipo exacto de daño (fractura, abrasión, corrosión, quemadura), severidad, componentes faltantes o desplazados
+4. RAZONA sobre implicaciones reales: qué causó el daño visible, qué riesgos implica, qué acciones concretas se recomiendan
+5. DETECTA detalles técnicos: tipo de conexiones, materiales, generación del producto, partes visibles relevantes
 
 Responde SOLO con JSON válido sin markdown ni texto adicional:
 {
   "objectType": "tipo específico y detallado",
   "brand": "marca exacta o Similar a [referencia conocida]",
-  "model": "modelo completo con variante, generación o Similar a [modelo conocido]",
-  "description": "diagnóstico directo del estado y sus implicaciones, máximo 140 caracteres",
+  "model": "modelo completo con variante y generación, o Similar a [modelo conocido]",
+  "description": "diagnóstico directo: qué es, qué estado tiene y qué implica. Máximo 140 caracteres",
   "confidence": 0,
   "characteristics": {
     "texto_visible": "todo el texto legible o Ninguno",
     "numero_modelo": "número de modelo si es visible o No visible",
     "version_generacion": "versión o generación identificable o No determinada",
-    "estado_fisico": "diagnóstico del estado: zona afectada, tipo de daño, severidad",
-    "implicaciones": "qué sugiere el estado observado y qué se recomienda",
+    "estado_fisico": "zona afectada + tipo de daño + severidad estimada",
+    "implicaciones": "causa probable del daño y recomendación accionable",
     "conexiones_componentes": "puertos, materiales o partes visibles relevantes",
     "color": "color principal"
   },
@@ -79,17 +79,17 @@ Responde SOLO con JSON válido sin markdown ni texto adicional:
   ]
 }
 
-REGLAS: description máximo 140 caracteres. alternatives máximo 2 items. Si no hay marca visible, pon "Similar a [producto conocido]" en brand. Confianza: 90+ marca Y modelo claros. 70-89 solo marca. 50-69 inferido por similitud.`;
+REGLAS: description máximo 140 caracteres. alternatives máximo 2 items. Nunca respondas "No determinado" sin antes intentar inferir por similitud visual. Confianza: 90+ marca Y modelo claros con texto. 70-89 solo marca visible. 50-69 inferido por diseño/similitud.`;
 
 // ─── Reparador de JSON cortado ─────────────────────────────────────────────────
 function tryRepairJSON(raw: string): string {
   let text = raw.replace(/```json|```/g, '').trim();
   text = text.replace(/,\s*([}\]])/g, '$1');
 
-  const opens    = (text.match(/\{/g) || []).length;
-  const closes   = (text.match(/\}/g) || []).length;
-  const arrOpens = (text.match(/\[/g) || []).length;
-  const arrCloses= (text.match(/\]/g) || []).length;
+  const opens     = (text.match(/\{/g) || []).length;
+  const closes    = (text.match(/\}/g) || []).length;
+  const arrOpens  = (text.match(/\[/g) || []).length;
+  const arrCloses = (text.match(/\]/g) || []).length;
 
   const lastChar = text[text.length - 1];
   if (lastChar !== '}' && lastChar !== ']' && lastChar !== '"') {
@@ -117,8 +117,8 @@ async function callOpenAI(
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error('OPENAI_API_KEY no configurada');
 
-  // Luna usa detail:low + menos tokens para mayor velocidad y menor costo
-  // Sol usa detail:high + más tokens para análisis forense completo
+  // Luna: detail:low — el frontend ya le manda 640px, suficiente para logos y diseños
+  // Sol:  detail:high — recibe 800px + resolución alta para análisis forense completo
   const isSOL      = model === 'gpt-6-sol';
   const maxTokens  = isSOL ? 1400 : 1000;
   const detailMode = isSOL ? 'high' : 'low';
@@ -153,9 +153,9 @@ async function callOpenAI(
     }
   );
 
-  const choice      = response.data.choices[0];
-  const rawText: string  = choice.message.content || '';
-  const finishReason: string = choice.finish_reason || '';
+  const choice       = response.data.choices[0];
+  const rawText: string   = choice.message.content || '';
+  const finishReason: string  = choice.finish_reason || '';
 
   console.log(`✅ ${model} | finish: ${finishReason} | chars: ${rawText.length}`);
 
@@ -225,7 +225,7 @@ export async function analyzeImageWithGemini(
 }
 
 // ─── Análisis contextual (tercera llamada) ─────────────────────────────────────
-// Recibe el resultado completo para que pueda razonar sobre lo ya detectado
+// Recibe el resultado completo para razonar sobre lo que ya se detectó visualmente
 export async function analyzeContextWithGemini(
   objectType: string,
   brand: string,
@@ -237,10 +237,10 @@ export async function analyzeContextWithGemini(
   if (!apiKey) return '';
 
   // Extraer campos clave para dar al modelo contexto rico sin tokens extra
-  const estadoFisico   = characteristics['estado_fisico']          || '';
-  const implicaciones  = characteristics['implicaciones']           || '';
-  const conexiones     = characteristics['conexiones_componentes']  || '';
-  const textoVisible   = characteristics['texto_visible']           || '';
+  const estadoFisico  = characteristics['estado_fisico']         || '';
+  const implicaciones = characteristics['implicaciones']          || '';
+  const conexiones    = characteristics['conexiones_componentes'] || '';
+  const textoVisible  = characteristics['texto_visible']          || '';
 
   const prompt = `Eres un analista experto en objetos físicos. Se te entrega el resultado de un análisis visual ya realizado. Tu tarea es escribir una conclusión inteligente y accionable basada en los datos reales observados, no en suposiciones genéricas.
 
@@ -249,10 +249,10 @@ DATOS DEL ANÁLISIS VISUAL:
 - Marca: ${brand}
 - Modelo: ${model}
 - Descripción detectada: ${description}
-${estadoFisico   ? `- Estado físico observado: ${estadoFisico}`  : ''}
-${implicaciones  ? `- Implicaciones detectadas: ${implicaciones}` : ''}
-${conexiones     ? `- Componentes/conexiones: ${conexiones}`      : ''}
-${textoVisible   ? `- Texto visible: ${textoVisible}`             : ''}
+${estadoFisico  ? `- Estado físico observado: ${estadoFisico}`  : ''}
+${implicaciones ? `- Implicaciones detectadas: ${implicaciones}` : ''}
+${conexiones    ? `- Componentes/conexiones: ${conexiones}`      : ''}
+${textoVisible  ? `- Texto visible: ${textoVisible}`             : ''}
 
 INSTRUCCIONES:
 - Escribe 2-3 oraciones en español, párrafo natural, sin listas
