@@ -17,26 +17,23 @@ router.post('/', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'No se recibió imagen' });
     }
 
-    // Guardar imagen base64 como archivo temporal
+    // Guardar imagen temporal
     tempImagePath = path.join('uploads', `scan_${Date.now()}.jpg`);
     const imageBuffer = Buffer.from(imageBase64, 'base64');
     fs.writeFileSync(tempImagePath, imageBuffer);
 
     const ocrCount = ocrText.split(' ').filter((w: string) => w.length > 1).length;
-
-    console.log('📸 Imagen recibida, tamaño:', imageBuffer.length, 'bytes');
-    console.log('📝 Texto OCR:', ocrText || '(ninguno)');
-
-    // FASE 1: Análisis con Gemini Vision
-    console.log('🤖 Analizando con Gemini...');
     const scanMode = (req.body.scanMode as 'standard' | 'advanced') || 'standard';
+
+    console.log('📸 Imagen recibida:', imageBuffer.length, 'bytes | modo:', scanMode);
+
+    // FASE 1: Análisis visual principal
     const geminiResult = await analyzeImageWithGemini(tempImagePath, ocrText, scanMode);
-    console.log('✅ Gemini:', geminiResult.brand, geminiResult.model, `${geminiResult.confidence}%`);
+    console.log('✅ Visual:', geminiResult.brand, geminiResult.model, `${geminiResult.confidence}%`);
 
-    // FASE 2: Información adicional y análisis contextual en paralelo
-    console.log('🔍 Buscando información adicional...');
-    console.log('🧠 Generando análisis contextual...');
-
+    // FASE 2: Wikipedia + análisis contextual en paralelo
+    // El análisis contextual ahora recibe las características completas
+    // para razonar sobre lo que el modelo visual YA detectó
     const searchQuery = `${geminiResult.brand} ${geminiResult.model}`.trim();
 
     const [wikiResult, contextAnalysis] = await Promise.all([
@@ -46,18 +43,18 @@ router.post('/', async (req: Request, res: Response) => {
         geminiResult.brand,
         geminiResult.model,
         geminiResult.description,
-        geminiResult.characteristics
+        geminiResult.characteristics   // ← pasa todas las características detectadas
       ),
     ]);
 
-    console.log('📖 Info adicional:', wikiResult.found ? wikiResult.title : 'No encontrado');
-    console.log('🧠 Análisis contextual:', contextAnalysis ? 'Generado' : 'No generado');
+    console.log('📖 Wikipedia:', wikiResult.found ? wikiResult.title : 'No encontrado');
+    console.log('🧠 Contextual:', contextAnalysis ? 'OK' : 'Vacío');
 
-    // FASE 3: Calcular confianza
+    // FASE 3: Calcular confianza final
     const confidence = calculateConfidence(geminiResult, wikiResult, ocrCount);
-    console.log('📊 Confianza final:', confidence.score + '%', '-', confidence.level);
+    console.log('📊 Confianza:', confidence.score + '%', '-', confidence.level);
 
-    const response = {
+    res.json({
       success: true,
       result: {
         objectType:  geminiResult.objectType,
@@ -85,14 +82,14 @@ router.post('/', async (req: Request, res: Response) => {
         },
         sources: [
           {
-            name: 'Gemini Vision AI',
+            name: 'OpenAI Vision',
             type: 'Análisis visual por IA',
-            url:  'https://ai.google.dev',
+            url:  'https://openai.com',
           },
           {
-            name: 'Gemini AI — Análisis contextual',
+            name: 'OpenAI — Análisis contextual',
             type: 'Razonamiento e inferencia por IA',
-            url:  'https://ai.google.dev',
+            url:  'https://openai.com',
           },
           ...(wikiResult.found ? [{
             name: wikiResult.title,
@@ -101,9 +98,7 @@ router.post('/', async (req: Request, res: Response) => {
           }] : []),
         ],
       },
-    };
-
-    res.json(response);
+    });
 
   } catch (error: any) {
     console.error('❌ Error:', error.message);
