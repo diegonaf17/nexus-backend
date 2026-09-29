@@ -103,7 +103,6 @@ async function callOpenAI(
         },
       ],
       max_completion_tokens: model === 'gpt-6-sol' ? 800 : 500,
-      temperature: 0.2,
     },
     {
       headers: {
@@ -196,7 +195,6 @@ Escribe máximo 3 oraciones en párrafo natural. Responde SOLO con el texto del 
         model: 'gpt-6-luna',
         messages: [{ role: 'user', content: prompt }],
         max_completion_tokens: 300,
-        temperature: 0.4,
       },
       {
         headers: {
