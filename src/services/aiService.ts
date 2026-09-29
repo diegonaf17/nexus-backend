@@ -18,46 +18,45 @@ const PROMPT_STANDARD = (ocrText: string) => `Identifica este objeto físico con
 
 ${ocrText ? `TEXTO VISIBLE: "${ocrText}"` : ''}
 
-Responde SOLO con JSON válido sin markdown:
+Responde SOLO con JSON válido sin markdown ni texto adicional. El JSON debe ser completo y cerrado:
 {
   "objectType": "tipo de objeto",
-  "brand": "marca o 'Desconocida'",
-  "model": "modelo o 'No identificado'",
-  "description": "descripción breve en español",
-  "confidence": número 0-100,
+  "brand": "marca o Desconocida",
+  "model": "modelo o No identificado",
+  "description": "descripción breve en español máximo 80 caracteres",
+  "confidence": 0,
   "characteristics": {
     "texto_visible": "texto que ves en la imagen",
     "color": "color principal",
     "tipo": "categoría específica"
   },
   "alternatives": [
-    { "name": "alternativa", "confidence": número }
+    { "name": "alternativa", "confidence": 0 }
   ]
 }
 
-Confianza: 90+ si ves marca Y modelo claramente. 70-89 si solo marca. 50-69 si es probable. Menos si es incierto.`;
+REGLAS: description máximo 80 caracteres. alternatives máximo 2 items. Confianza: 90+ si ves marca Y modelo. 70-89 si solo marca. 50-69 probable. Menos si incierto.`;
 
 const PROMPT_ADVANCED = (ocrText: string) => `Eres un sistema experto de identificación de objetos físicos con visión avanzada.
 
 ${ocrText ? `TEXTO VISIBLE EN LA IMAGEN: "${ocrText}"` : ''}
 
-INSTRUCCIONES AVANZADAS:
+INSTRUCCIONES:
 1. Lee TODO el texto visible, incluso texto pequeño, números de serie, versiones
-2. Distingue entre variantes específicas del mismo producto (ej: OC vs base, versión A vs B)
+2. Distingue variantes específicas del mismo producto (ej: OC vs base)
 3. Detecta números de modelo exactos aunque sean pequeños
-4. Observa el estado físico detalladamente (rayones, desgaste, modificaciones, daños)
-5. Identifica accesorios, componentes o partes faltantes si es posible
-6. Lee etiquetas, stickers, códigos si son visibles
+4. Observa el estado físico (rayones, desgaste, modificaciones, daños)
+5. Identifica accesorios o partes faltantes si es posible
 
-Responde SOLO con JSON válido sin markdown:
+Responde SOLO con JSON válido sin markdown ni texto adicional. El JSON debe ser completo y cerrado:
 {
   "objectType": "tipo específico y detallado",
   "brand": "marca exacta",
   "model": "modelo completo con variante si es visible",
-  "description": "descripción detallada en español incluyendo estado físico",
-  "confidence": número 0-100,
+  "description": "descripción detallada incluyendo estado físico, máximo 120 caracteres",
+  "confidence": 0,
   "characteristics": {
-    "texto_visible": "TODO el texto que puedes leer",
+    "texto_visible": "todo el texto que puedes leer",
     "numero_modelo": "número de modelo si es visible",
     "numero_serie": "número de serie si es visible",
     "version": "versión específica si es identificable",
@@ -66,11 +65,44 @@ Responde SOLO con JSON válido sin markdown:
     "tipo": "categoría específica"
   },
   "alternatives": [
-    { "name": "alternativa con variante específica", "confidence": número }
+    { "name": "alternativa con variante específica", "confidence": 0 }
   ]
 }
 
-Confianza: 90+ si ves marca Y modelo claramente. 70-89 si solo marca. 50-69 si es probable.`;
+REGLAS: description máximo 120 caracteres. alternatives máximo 2 items. Confianza: 90+ si ves marca Y modelo. 70-89 si solo marca. 50-69 probable.`;
+
+// Intenta reparar un JSON cortado cerrando llaves/corchetes faltantes
+function tryRepairJSON(raw: string): string {
+  let text = raw.replace(/```json|```/g, '').trim();
+
+  // Eliminar coma final antes de cierre
+  text = text.replace(/,\s*([}\]])/g, '$1');
+
+  // Contar aperturas y cierres
+  const opens = (text.match(/\{/g) || []).length;
+  const closes = (text.match(/\}/g) || []).length;
+  const arrOpens = (text.match(/\[/g) || []).length;
+  const arrCloses = (text.match(/\]/g) || []).length;
+
+  // Cerrar strings abiertos si el último carácter no es un cierre
+  const lastChar = text[text.length - 1];
+  if (lastChar !== '}' && lastChar !== ']' && lastChar !== '"') {
+    // Cortar en el último campo completo (antes de la última coma o cierre)
+    const lastValidComma = text.lastIndexOf(',');
+    const lastValidClose = Math.max(text.lastIndexOf('}'), text.lastIndexOf(']'));
+    if (lastValidClose > lastValidComma) {
+      text = text.substring(0, lastValidClose + 1);
+    } else if (lastValidComma > 0) {
+      text = text.substring(0, lastValidComma);
+    }
+  }
+
+  // Cerrar arrays y objetos faltantes
+  for (let i = 0; i < arrOpens - arrCloses; i++) text += ']';
+  for (let i = 0; i < opens - closes; i++) text += '}';
+
+  return text;
+}
 
 async function callOpenAI(
   base64Image: string,
@@ -79,6 +111,9 @@ async function callOpenAI(
 ): Promise<GeminiResult> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error('OPENAI_API_KEY no configurada');
+
+  // Tokens aumentados: sol=1500, luna=1200
+  const maxTokens = model === 'gpt-6-sol' ? 1500 : 1200;
 
   const response = await axios.post(
     OPENAI_URL,
@@ -102,22 +137,45 @@ async function callOpenAI(
           ],
         },
       ],
-      max_completion_tokens: model === 'gpt-6-sol' ? 800 : 500,
+      max_completion_tokens: maxTokens,
     },
     {
       headers: {
         'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
-      timeout: 40000,
+      timeout: 45000,
     }
   );
 
-  const rawText = response.data.choices[0].message.content;
-  console.log(`✅ ${model} respondió correctamente`);
+  const choice = response.data.choices[0];
+  const rawText: string = choice.message.content || '';
+  const finishReason: string = choice.finish_reason || '';
 
-  const cleaned = rawText.replace(/```json|```/g, '').trim();
-  const parsed = JSON.parse(cleaned);
+  console.log(`✅ ${model} respondió | finish_reason: ${finishReason} | tokens: ${rawText.length} chars`);
+
+  // Advertir si se cortó por límite de tokens
+  if (finishReason === 'length') {
+    console.log(`⚠️ Respuesta cortada por max_tokens en ${model}, intentando reparar JSON...`);
+  }
+
+  let cleaned = rawText.replace(/```json|```/g, '').trim();
+
+  let parsed: any;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch (firstError) {
+    console.log(`⚠️ JSON inválido, intentando reparar... (${(firstError as Error).message})`);
+    try {
+      const repaired = tryRepairJSON(cleaned);
+      console.log(`🔧 JSON reparado: ${repaired.substring(0, 80)}...`);
+      parsed = JSON.parse(repaired);
+    } catch (secondError) {
+      console.log(`❌ No se pudo reparar el JSON: ${(secondError as Error).message}`);
+      console.log(`📄 Raw response (primeros 200 chars): ${rawText.substring(0, 200)}`);
+      throw new Error(`JSON inválido de ${model}: ${(secondError as Error).message}`);
+    }
+  }
 
   return {
     objectType:      parsed.objectType      || 'Desconocido',
@@ -153,7 +211,12 @@ export async function analyzeImageWithGemini(
 
     if (scanMode === 'advanced') {
       console.log('🔄 Fallback a gpt-6-luna...');
-      return await callOpenAI(base64Image, PROMPT_STANDARD(ocrText), 'gpt-6-luna');
+      try {
+        return await callOpenAI(base64Image, PROMPT_STANDARD(ocrText), 'gpt-6-luna');
+      } catch (fallbackError: any) {
+        const fbMessage = fallbackError.response?.data?.error?.message || fallbackError.message;
+        throw new Error(`Error de IA (fallback): ${fbMessage}`);
+      }
     }
 
     throw new Error(`Error de IA: ${message}`);
@@ -186,7 +249,7 @@ Proporciona un ANÁLISIS CONTEXTUAL inteligente en español que incluya:
 4. ESTADO FÍSICO: Observa si parece nuevo, usado, dañado o incompleto
 5. ADVERTENCIA si aplica
 
-Escribe máximo 3 oraciones en párrafo natural. Responde SOLO con el texto del análisis.`;
+Escribe máximo 3 oraciones en párrafo natural. Responde SOLO con el texto del análisis, sin JSON.`;
 
   try {
     const response = await axios.post(
@@ -194,14 +257,14 @@ Escribe máximo 3 oraciones en párrafo natural. Responde SOLO con el texto del 
       {
         model: 'gpt-6-luna',
         messages: [{ role: 'user', content: prompt }],
-        max_completion_tokens: 300,
+        max_completion_tokens: 400,
       },
       {
         headers: {
           'Authorization': `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
         },
-        timeout: 15000,
+        timeout: 20000,
       }
     );
 
