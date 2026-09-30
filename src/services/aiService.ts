@@ -11,75 +11,126 @@ export interface GeminiResult {
   characteristics: Record<string, string>;
   confidence: number;
   alternatives: { name: string; confidence: number }[];
+  urgencyLevel: 'SEGURO' | 'REVISAR' | 'ATENCIÓN' | 'PELIGRO';
+  urgencyReason: string;
+  chemicalWarning: string;
   rawAnalysis: string;
 }
 
-// ─── LUNA: Observador confiado, concluye con criterio, eficiente ───────────────
-const PROMPT_STANDARD = (ocrText: string) => `Eres un analizador visual de objetos físicos. Observas, identificas y concluyes con confianza basándote en lo que ves claramente.
-
-${ocrText ? `TEXTO VISIBLE EN LA IMAGEN: "${ocrText}"` : ''}
-
-INSTRUCCIONES:
-- Identifica marca, modelo y tipo de objeto
-- Si no ves marca con texto claro, identifica por diseño, forma, distribución de botones o estilo visual. Usa "Similar a [marca conocida]" si el diseño es reconocible
-- Describe el estado físico visible: vacío, lleno, roto, sucio, desgastado, nuevo
-- Concluye lo que el estado implica: "la botella está vacía, lo que indica que su contenido fue consumido", "el dispositivo muestra polvo acumulado, sugiere poco uso reciente", "la esquina presenta fractura por impacto"
-- Sé directo y útil. Nunca escribas "no hay suficiente información" ni "no se puede determinar"
-
-Responde SOLO con JSON válido sin markdown ni texto adicional:
-{
-  "objectType": "tipo de objeto específico",
-  "brand": "marca exacta, Similar a [marca] si identificas por diseño, o Desconocida solo si no hay referencia posible",
-  "model": "modelo exacto, Similar a [modelo] si es inferido, o No identificado",
-  "description": "estado físico y conclusión directa, máximo 100 caracteres",
-  "confidence": 0,
-  "characteristics": {
-    "estado_fisico": "descripción del estado visible y lo que implica",
-    "color": "color principal",
-    "tipo": "categoría específica",
-    "texto_visible": "todo texto legible o Ninguno"
-  },
-  "alternatives": [
-    { "name": "posible alternativa", "confidence": 0 }
-  ]
+export interface LunaSpecs {
+  contextAnalysis: string;
+  chemicalAnalysis: string;
+  riskAssessment: string;
+  recommendations: string;
 }
 
-REGLAS: description máximo 100 caracteres. alternatives máximo 2 items. Confianza: 90+ marca Y modelo visibles con texto. 70-89 marca visible o diseño muy reconocible. 50-69 inferido por similitud. Menos si realmente incierto.`;
+// ─── FASE 0: Detección de nivel de detalle necesario (llamada ultrabarata) ─────
+const PROMPT_DETAIL_CHECK = `Eres un clasificador rápido de imágenes. Tu ÚNICA tarea es decidir si esta imagen necesita análisis de alta resolución o baja resolución.
 
-// ─── SOL: Perito forense, razona en capas, detecta detalles finos ──────────────
-const PROMPT_ADVANCED = (ocrText: string) => `Eres un sistema de análisis forense visual de objetos físicos. Tu función es identificar con precisión máxima, razonar sobre lo que observas y emitir diagnósticos accionables.
+Responde SOLO con este JSON sin markdown:
+{
+  "needsHighDetail": true,
+  "reason": "motivo en 5 palabras máximo"
+}
+
+needsHighDetail = true si: hay texto pequeño, logos, números de modelo, placas técnicas, chips, circuitos, etiquetas con información, texto en envases, códigos, o el objeto es pequeño y tiene detalles finos.
+needsHighDetail = false si: el objeto es grande y obvio (mueble, ropa, botella sin etiqueta visible, escombros, comida genérica, objetos naturales).`;
+
+// ─── SOL: Perito forense visual — identifica, diagnostica, detecta riesgos ─────
+const PROMPT_SOL = (ocrText: string) => `Eres un sistema de análisis forense visual de objetos físicos con capacidad de detección de riesgos químicos y físicos. Analizas con precisión máxima y emites diagnósticos accionables.
 
 ${ocrText ? `TEXTO VISIBLE EN LA IMAGEN: "${ocrText}"` : ''}
 
-PROCESO DE ANÁLISIS:
-1. LEE todo texto visible: etiquetas, números de modelo, serie, versiones, stickers, códigos
-2. IDENTIFICA marca y modelo exacto; si no hay marca visible, busca similitudes por forma, materiales, distribución de elementos, tipo de conexiones o estilo de diseño. Referencia productos conocidos
-3. EVALÚA el estado físico en detalle: localiza zonas específicas de desgaste, tipo exacto de daño (fractura, abrasión, corrosión, quemadura), severidad, componentes faltantes o desplazados
-4. RAZONA sobre implicaciones reales: qué causó el daño visible, qué riesgos implica, qué acciones concretas se recomiendan
-5. DETECTA detalles técnicos: tipo de conexiones, materiales, generación del producto, partes visibles relevantes
+PROCESO DE ANÁLISIS EN CAPAS:
+1. LEE todo texto visible: etiquetas, números de modelo, serie, versiones, ingredientes, advertencias, códigos
+2. IDENTIFICA marca y modelo exacto. Si no hay marca visible, busca similitudes por forma, materiales, distribución de elementos, tipo de conexiones o estilo de diseño
+3. EVALÚA el estado físico zona por zona: desgaste específico por área, tipo exacto de daño (fractura, abrasión, corrosión, quemadura, abolladura), severidad, componentes faltantes
+4. ANALIZA el entorno visible: humedad, suciedad ambiental, contexto de riesgo, señales de mal almacenamiento
+5. DETECTA composición probable: si es alimento, producto químico, humo, polvo, gas, material industrial o doméstico — identifica compuestos probables y riesgos asociados
+6. EVALÚA nivel de urgencia basado en lo observado
 
-Responde SOLO con JSON válido sin markdown ni texto adicional:
+Responde SOLO con JSON válido sin markdown:
 {
   "objectType": "tipo específico y detallado",
   "brand": "marca exacta o Similar a [referencia conocida]",
   "model": "modelo completo con variante y generación, o Similar a [modelo conocido]",
-  "description": "diagnóstico directo: qué es, qué estado tiene y qué implica. Máximo 140 caracteres",
+  "description": "diagnóstico directo: qué es, estado y qué implica. Máximo 140 caracteres",
   "confidence": 0,
   "characteristics": {
     "texto_visible": "todo el texto legible o Ninguno",
-    "numero_modelo": "número de modelo si es visible o No visible",
+    "numero_modelo": "número de modelo si visible o No visible",
     "version_generacion": "versión o generación identificable o No determinada",
-    "estado_fisico": "zona afectada + tipo de daño + severidad estimada",
-    "implicaciones": "causa probable del daño y recomendación accionable",
-    "conexiones_componentes": "puertos, materiales o partes visibles relevantes",
+    "estado_fisico": "zona afectada + tipo de daño + severidad + qué lo causó probablemente",
+    "entorno_visible": "descripción del contexto ambiental visible alrededor del objeto",
+    "implicaciones": "consecuencias del estado observado y recomendación accionable",
+    "conexiones_componentes": "puertos, materiales, partes visibles relevantes o No aplica",
     "color": "color principal"
   },
   "alternatives": [
     { "name": "alternativa específica con variante", "confidence": 0 }
-  ]
+  ],
+  "urgencyLevel": "SEGURO",
+  "urgencyReason": "justificación breve del nivel de urgencia en máximo 80 caracteres",
+  "chemicalWarning": "si el objeto puede contener compuestos químicos relevantes: lista los compuestos probables y su riesgo. Si no aplica: vacío"
 }
 
-REGLAS: description máximo 140 caracteres. alternatives máximo 2 items. Nunca respondas "No determinado" sin antes intentar inferir por similitud visual. Confianza: 90+ marca Y modelo claros con texto. 70-89 solo marca visible. 50-69 inferido por diseño/similitud.`;
+REGLAS CRÍTICAS:
+- description máximo 140 caracteres
+- alternatives máximo 2 items
+- urgencyLevel debe ser exactamente uno de: SEGURO, REVISAR, ATENCIÓN, PELIGRO
+- SEGURO: objeto en buen estado sin riesgos detectables
+- REVISAR: desgaste o condición que merece atención no urgente
+- ATENCIÓN: daño significativo, riesgo potencial, requiere acción pronto
+- PELIGRO: riesgo inmediato para la salud o seguridad (batería abultada, producto tóxico, estructura comprometida, sustancia peligrosa)
+- chemicalWarning: úsalo para alimentos procesados, humo, polvo, gases, pinturas, solventes, productos de limpieza, medicamentos, materiales industriales
+- Nunca respondas "No determinado" sin intentar inferir por similitud visual`;
+
+// ─── LUNA: Genera specs y análisis profundo SIN imagen, solo con datos de Sol ──
+const PROMPT_LUNA_SPECS = (
+  objectType: string,
+  brand: string,
+  model: string,
+  description: string,
+  characteristics: Record<string, string>,
+  urgencyLevel: string,
+  urgencyReason: string,
+  chemicalWarning: string
+) => {
+  const estadoFisico   = characteristics['estado_fisico']          || '';
+  const entorno        = characteristics['entorno_visible']         || '';
+  const implicaciones  = characteristics['implicaciones']           || '';
+  const conexiones     = characteristics['conexiones_componentes']  || '';
+  const textoVisible   = characteristics['texto_visible']           || '';
+
+  return `Eres un analista experto en objetos físicos, materiales y seguridad. Recibes el resultado de un análisis visual forense ya realizado por otro sistema. Tu tarea es generar un análisis profundo, inteligente y accionable basado en esos datos reales.
+
+DATOS DEL ANÁLISIS VISUAL:
+- Objeto: ${objectType}
+- Marca: ${brand}
+- Modelo: ${model}
+- Descripción detectada: ${description}
+- Nivel de urgencia: ${urgencyLevel} — ${urgencyReason}
+${estadoFisico   ? `- Estado físico: ${estadoFisico}`          : ''}
+${entorno        ? `- Entorno visible: ${entorno}`              : ''}
+${implicaciones  ? `- Implicaciones detectadas: ${implicaciones}` : ''}
+${conexiones     ? `- Componentes visibles: ${conexiones}`      : ''}
+${textoVisible   ? `- Texto visible: ${textoVisible}`           : ''}
+${chemicalWarning ? `- Advertencia química detectada: ${chemicalWarning}` : ''}
+
+Responde SOLO con este JSON sin markdown:
+{
+  "contextAnalysis": "análisis contextual inteligente: 2-3 oraciones explicando qué implica el estado del objeto, qué lo causó y qué se recomienda. Basado SOLO en los datos reales de arriba",
+  "chemicalAnalysis": "si hay advertencia química: explica los compuestos probables, sus efectos en la salud y medidas de precaución específicas. Si no hay: cadena vacía",
+  "riskAssessment": "evaluación de riesgo detallada si urgencyLevel es ATENCIÓN o PELIGRO. Explica el riesgo concreto y pasos a seguir. Si es SEGURO o REVISAR: cadena vacía",
+  "recommendations": "2-3 recomendaciones concretas y accionables basadas en lo observado. Siempre presente"
+}
+
+REGLAS:
+- Basa TODO en los datos reales, no inventes información
+- Si hay riesgo químico, sé específico con los compuestos (ej: dióxido de nitrógeno, monóxido de carbono, partículas PM2.5, etc.)
+- Si hay daño físico grave, da pasos concretos (ej: "no conectar hasta revisar el puerto", "reemplazar batería inmediatamente")
+- Responde SOLO con el JSON`;
+};
 
 // ─── Reparador de JSON cortado ─────────────────────────────────────────────────
 function tryRepairJSON(raw: string): string {
@@ -104,29 +155,69 @@ function tryRepairJSON(raw: string): string {
 
   for (let i = 0; i < arrOpens - arrCloses; i++) text += ']';
   for (let i = 0; i < opens - closes; i++) text += '}';
-
   return text;
 }
 
-// ─── Llamada a OpenAI ──────────────────────────────────────────────────────────
-async function callOpenAI(
+function safeParseJSON(raw: string): any {
+  const cleaned = raw.replace(/```json|```/g, '').trim();
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    try {
+      return JSON.parse(tryRepairJSON(cleaned));
+    } catch (e2) {
+      throw new Error(`JSON inválido: ${(e2 as Error).message}`);
+    }
+  }
+}
+
+// ─── FASE 0: Decidir nivel de detalle ─────────────────────────────────────────
+async function decideDetailLevel(base64Image: string, apiKey: string): Promise<boolean> {
+  try {
+    const response = await axios.post(
+      OPENAI_URL,
+      {
+        model: 'gpt-6-luna',
+        messages: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'image_url',
+                image_url: { url: `data:image/jpeg;base64,${base64Image}`, detail: 'low' },
+              },
+              { type: 'text', text: PROMPT_DETAIL_CHECK },
+            ],
+          },
+        ],
+        max_completion_tokens: 60,
+      },
+      {
+        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        timeout: 10000,
+      }
+    );
+    const parsed = safeParseJSON(response.data.choices[0].message.content || '{}');
+    const needs = parsed.needsHighDetail === true;
+    console.log(`🔍 Nivel de detalle: ${needs ? 'HIGH' : 'LOW'} — ${parsed.reason || ''}`);
+    return needs;
+  } catch (e) {
+    console.log('⚠️ Detail check falló, usando high por defecto');
+    return true;
+  }
+}
+
+// ─── FASE 1: Sol analiza imagen ────────────────────────────────────────────────
+async function analyzWithSol(
   base64Image: string,
-  prompt: string,
-  model: string
+  ocrText: string,
+  needsHighDetail: boolean,
+  apiKey: string
 ): Promise<GeminiResult> {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) throw new Error('OPENAI_API_KEY no configurada');
-
-  // Luna: detail:low — el frontend ya le manda 640px, suficiente para logos y diseños
-  // Sol:  detail:high — recibe 800px + resolución alta para análisis forense completo
-  const isSOL      = model === 'gpt-6-sol';
-  const maxTokens  = isSOL ? 1400 : 1000;
-  const detailMode = isSOL ? 'high' : 'low';
-
   const response = await axios.post(
     OPENAI_URL,
     {
-      model,
+      model: 'gpt-6-sol',
       messages: [
         {
           role: 'user',
@@ -135,48 +226,29 @@ async function callOpenAI(
               type: 'image_url',
               image_url: {
                 url: `data:image/jpeg;base64,${base64Image}`,
-                detail: detailMode,
+                detail: needsHighDetail ? 'high' : 'low',
               },
             },
-            { type: 'text', text: prompt },
+            { type: 'text', text: PROMPT_SOL(ocrText) },
           ],
         },
       ],
-      max_completion_tokens: maxTokens,
+      max_completion_tokens: 1400,
     },
     {
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      timeout: 30000,
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      timeout: 35000,
     }
   );
 
-  const choice       = response.data.choices[0];
-  const rawText: string   = choice.message.content || '';
-  const finishReason: string  = choice.finish_reason || '';
+  const choice      = response.data.choices[0];
+  const rawText     = choice.message.content || '';
+  const finishReason = choice.finish_reason || '';
 
-  console.log(`✅ ${model} | finish: ${finishReason} | chars: ${rawText.length}`);
+  console.log(`✅ Sol | finish: ${finishReason} | chars: ${rawText.length} | detail: ${needsHighDetail ? 'high' : 'low'}`);
+  if (finishReason === 'length') console.log('⚠️ JSON cortado por max_tokens, reparando...');
 
-  if (finishReason === 'length') {
-    console.log(`⚠️ JSON cortado por max_tokens en ${model}, reparando...`);
-  }
-
-  const cleaned = rawText.replace(/```json|```/g, '').trim();
-
-  let parsed: any;
-  try {
-    parsed = JSON.parse(cleaned);
-  } catch {
-    try {
-      parsed = JSON.parse(tryRepairJSON(cleaned));
-      console.log(`🔧 JSON reparado exitosamente`);
-    } catch (e2) {
-      console.log(`❌ JSON irreparable. Raw (200): ${rawText.substring(0, 200)}`);
-      throw new Error(`JSON inválido de ${model}: ${(e2 as Error).message}`);
-    }
-  }
+  const parsed = safeParseJSON(rawText);
 
   return {
     objectType:      parsed.objectType      || 'Desconocido',
@@ -186,81 +258,28 @@ async function callOpenAI(
     confidence:      parsed.confidence      || 0,
     characteristics: parsed.characteristics || {},
     alternatives:    parsed.alternatives    || [],
+    urgencyLevel:    parsed.urgencyLevel    || 'SEGURO',
+    urgencyReason:   parsed.urgencyReason   || '',
+    chemicalWarning: parsed.chemicalWarning || '',
     rawAnalysis:     rawText,
   };
 }
 
-// ─── Análisis visual principal ─────────────────────────────────────────────────
-export async function analyzeImageWithGemini(
-  imagePath: string,
-  ocrText: string,
-  scanMode: 'standard' | 'advanced' = 'standard'
-): Promise<GeminiResult> {
-  const imageBuffer = fs.readFileSync(imagePath);
-  const base64Image = imageBuffer.toString('base64');
-
-  const model  = scanMode === 'advanced' ? 'gpt-6-sol' : 'gpt-6-luna';
-  const prompt = scanMode === 'advanced' ? PROMPT_ADVANCED(ocrText) : PROMPT_STANDARD(ocrText);
-
-  console.log(`🤖 Usando ${model} (modo ${scanMode})`);
-
-  try {
-    return await callOpenAI(base64Image, prompt, model);
-  } catch (error: any) {
-    const status  = error.response?.status;
-    const message = error.response?.data?.error?.message || error.message;
-    console.log(`⚠️ ${model} error: ${status} — ${message}`);
-
-    if (scanMode === 'advanced') {
-      console.log('🔄 Fallback a gpt-6-luna...');
-      try {
-        return await callOpenAI(base64Image, PROMPT_STANDARD(ocrText), 'gpt-6-luna');
-      } catch (fb: any) {
-        throw new Error(`Error de IA (fallback): ${fb.response?.data?.error?.message || fb.message}`);
-      }
-    }
-
-    throw new Error(`Error de IA: ${message}`);
-  }
-}
-
-// ─── Análisis contextual (tercera llamada) ─────────────────────────────────────
-// Recibe el resultado completo para razonar sobre lo que ya se detectó visualmente
-export async function analyzeContextWithGemini(
-  objectType: string,
-  brand: string,
-  model: string,
-  description: string,
-  characteristics: Record<string, string>
-): Promise<string> {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) return '';
-
-  // Extraer campos clave para dar al modelo contexto rico sin tokens extra
-  const estadoFisico  = characteristics['estado_fisico']         || '';
-  const implicaciones = characteristics['implicaciones']          || '';
-  const conexiones    = characteristics['conexiones_componentes'] || '';
-  const textoVisible  = characteristics['texto_visible']          || '';
-
-  const prompt = `Eres un analista experto en objetos físicos. Se te entrega el resultado de un análisis visual ya realizado. Tu tarea es escribir una conclusión inteligente y accionable basada en los datos reales observados, no en suposiciones genéricas.
-
-DATOS DEL ANÁLISIS VISUAL:
-- Objeto: ${objectType}
-- Marca: ${brand}
-- Modelo: ${model}
-- Descripción detectada: ${description}
-${estadoFisico  ? `- Estado físico observado: ${estadoFisico}`  : ''}
-${implicaciones ? `- Implicaciones detectadas: ${implicaciones}` : ''}
-${conexiones    ? `- Componentes/conexiones: ${conexiones}`      : ''}
-${textoVisible  ? `- Texto visible: ${textoVisible}`             : ''}
-
-INSTRUCCIONES:
-- Escribe 2-3 oraciones en español, párrafo natural, sin listas
-- Basa tu análisis SOLO en los datos reales de arriba, no inventes información
-- Si hay estado físico relevante, úsalo para dar una recomendación concreta
-- Si el objeto representa un riesgo o requiere atención, indícalo claramente
-- No repitas lo que ya se ve en descripción, añade valor con tu razonamiento
-- Responde SOLO con el texto del análisis, sin JSON ni títulos`;
+// ─── FASE 2: Luna genera specs y análisis profundo (sin imagen) ────────────────
+async function generateLunaSpecs(
+  solResult: GeminiResult,
+  apiKey: string
+): Promise<LunaSpecs> {
+  const prompt = PROMPT_LUNA_SPECS(
+    solResult.objectType,
+    solResult.brand,
+    solResult.model,
+    solResult.description,
+    solResult.characteristics,
+    solResult.urgencyLevel,
+    solResult.urgencyReason,
+    solResult.chemicalWarning
+  );
 
   try {
     const response = await axios.post(
@@ -268,22 +287,60 @@ INSTRUCCIONES:
       {
         model: 'gpt-6-luna',
         messages: [{ role: 'user', content: prompt }],
-        max_completion_tokens: 280,
+        max_completion_tokens: 500,
       },
       {
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        timeout: 18000,
+        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        timeout: 20000,
       }
     );
 
-    const text = response.data.choices[0].message.content;
-    console.log('🧠 Análisis contextual generado');
-    return text.trim();
+    const rawText = response.data.choices[0].message.content || '';
+    console.log('🧠 Luna specs generado');
+    const parsed = safeParseJSON(rawText);
+
+    return {
+      contextAnalysis:  parsed.contextAnalysis  || '',
+      chemicalAnalysis: parsed.chemicalAnalysis  || '',
+      riskAssessment:   parsed.riskAssessment    || '',
+      recommendations:  parsed.recommendations   || '',
+    };
   } catch (e: any) {
-    console.log('⚠️ Análisis contextual error:', e.message);
-    return '';
+    console.log('⚠️ Luna specs error:', e.message);
+    return { contextAnalysis: '', chemicalAnalysis: '', riskAssessment: '', recommendations: '' };
   }
+}
+
+// ─── Exports principales ───────────────────────────────────────────────────────
+export async function analyzeImageWithGemini(
+  imagePath: string,
+  ocrText: string
+): Promise<GeminiResult> {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) throw new Error('OPENAI_API_KEY no configurada');
+
+  const imageBuffer = fs.readFileSync(imagePath);
+  const base64Image = imageBuffer.toString('base64');
+
+  console.log('🤖 Iniciando análisis Sol+Luna');
+
+  // Fase 0: decidir nivel de detalle (llamada barata)
+  const needsHighDetail = await decideDetailLevel(base64Image, apiKey);
+
+  // Fase 1: Sol analiza la imagen
+  try {
+    return await analyzWithSol(base64Image, ocrText, needsHighDetail, apiKey);
+  } catch (error: any) {
+    const message = error.response?.data?.error?.message || error.message;
+    console.log(`⚠️ Sol error: ${message}`);
+    throw new Error(`Error de IA: ${message}`);
+  }
+}
+
+export async function analyzeContextWithGemini(
+  solResult: GeminiResult
+): Promise<LunaSpecs> {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) return { contextAnalysis: '', chemicalAnalysis: '', riskAssessment: '', recommendations: '' };
+  return generateLunaSpecs(solResult, apiKey);
 }

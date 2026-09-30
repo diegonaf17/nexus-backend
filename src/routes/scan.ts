@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import * as fs from 'fs';
 import * as path from 'path';
-import { analyzeImageWithGemini, analyzeContextWithGemini } from '../services/aiService';
+import { analyzeImageWithGemini, analyzeContextWithGemini, GeminiResult } from '../services/aiService';
 import { searchWikipedia } from '../services/wikipediaService';
 import { calculateConfidence } from '../services/confidenceEngine';
 
@@ -17,50 +17,39 @@ router.post('/', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'No se recibió imagen' });
     }
 
-    // Guardar imagen temporal
     tempImagePath = path.join('uploads', `scan_${Date.now()}.jpg`);
     const imageBuffer = Buffer.from(imageBase64, 'base64');
     fs.writeFileSync(tempImagePath, imageBuffer);
 
     const ocrCount = ocrText.split(' ').filter((w: string) => w.length > 1).length;
-    const scanMode = (req.body.scanMode as 'standard' | 'advanced') || 'standard';
+    console.log('📸 Imagen recibida:', imageBuffer.length, 'bytes');
 
-    console.log('📸 Imagen recibida:', imageBuffer.length, 'bytes | modo:', scanMode);
+    // FASE 1: Sol analiza la imagen visualmente
+    const solResult: GeminiResult = await analyzeImageWithGemini(tempImagePath, ocrText);
+    console.log('✅ Sol:', solResult.brand, solResult.model, `${solResult.confidence}% | ${solResult.urgencyLevel}`);
 
-    // FASE 1: Análisis visual principal
-    const geminiResult = await analyzeImageWithGemini(tempImagePath, ocrText, scanMode);
-    console.log('✅ Visual:', geminiResult.brand, geminiResult.model, `${geminiResult.confidence}%`);
+    // FASE 2: Luna + Wikipedia en paralelo (Luna sin imagen = muy barato)
+    const searchQuery = `${solResult.brand} ${solResult.model}`.trim();
 
-    // FASE 2: Wikipedia + análisis contextual en paralelo
-    // El análisis contextual ahora recibe las características completas
-    // para razonar sobre lo que el modelo visual YA detectó
-    const searchQuery = `${geminiResult.brand} ${geminiResult.model}`.trim();
-
-    const [wikiResult, contextAnalysis] = await Promise.all([
+    const [wikiResult, lunaSpecs] = await Promise.all([
       searchWikipedia(searchQuery),
-      analyzeContextWithGemini(
-        geminiResult.objectType,
-        geminiResult.brand,
-        geminiResult.model,
-        geminiResult.description,
-        geminiResult.characteristics   // ← pasa todas las características detectadas
-      ),
+      analyzeContextWithGemini(solResult),
     ]);
 
     console.log('📖 Wikipedia:', wikiResult.found ? wikiResult.title : 'No encontrado');
-    console.log('🧠 Contextual:', contextAnalysis ? 'OK' : 'Vacío');
+    console.log('🧠 Luna specs: OK');
 
-    // FASE 3: Calcular confianza final
-    const confidence = calculateConfidence(geminiResult, wikiResult, ocrCount);
+    // FASE 3: Confianza final
+    const confidence = calculateConfidence(solResult, wikiResult, ocrCount);
     console.log('📊 Confianza:', confidence.score + '%', '-', confidence.level);
 
     res.json({
       success: true,
       result: {
-        objectType:  geminiResult.objectType,
-        brand:       geminiResult.brand,
-        model:       geminiResult.model,
-        description: geminiResult.description,
+        objectType:  solResult.objectType,
+        brand:       solResult.brand,
+        model:       solResult.model,
+        description: solResult.description,
         confidence: {
           score:         confidence.score,
           level:         confidence.level,
@@ -69,10 +58,19 @@ router.post('/', async (req: Request, res: Response) => {
           needsMoreInfo: confidence.needsMoreInfo,
           suggestions:   confidence.suggestions,
         },
-        characteristics: geminiResult.characteristics,
-        alternatives:    geminiResult.alternatives,
+        urgency: {
+          level:  solResult.urgencyLevel,
+          reason: solResult.urgencyReason,
+          color:  urgencyColor(solResult.urgencyLevel),
+        },
+        characteristics:  solResult.characteristics,
+        alternatives:     solResult.alternatives,
+        chemicalWarning:  solResult.chemicalWarning || '',
         additionalInfo: {
-          contextAnalysis: contextAnalysis || '',
+          contextAnalysis:  lunaSpecs.contextAnalysis,
+          chemicalAnalysis: lunaSpecs.chemicalAnalysis,
+          riskAssessment:   lunaSpecs.riskAssessment,
+          recommendations:  lunaSpecs.recommendations,
           wikipedia: {
             found:   wikiResult.found,
             title:   wikiResult.title,
@@ -81,36 +79,30 @@ router.post('/', async (req: Request, res: Response) => {
           },
         },
         sources: [
-          {
-            name: 'OpenAI Vision',
-            type: 'Análisis visual por IA',
-            url:  'https://openai.com',
-          },
-          {
-            name: 'OpenAI — Análisis contextual',
-            type: 'Razonamiento e inferencia por IA',
-            url:  'https://openai.com',
-          },
-          ...(wikiResult.found ? [{
-            name: wikiResult.title,
-            type: 'Base de conocimiento',
-            url:  wikiResult.url,
-          }] : []),
+          { name: 'OpenAI Sol — Análisis forense visual', type: 'Visión artificial de alta precisión', url: 'https://openai.com' },
+          { name: 'OpenAI Luna — Análisis e inferencia',  type: 'Razonamiento y especificaciones',     url: 'https://openai.com' },
+          ...(wikiResult.found ? [{ name: wikiResult.title, type: 'Base de conocimiento', url: wikiResult.url }] : []),
         ],
       },
     });
 
   } catch (error: any) {
     console.error('❌ Error:', error.message);
-    res.status(500).json({
-      success: false,
-      error: error.message || 'Error interno',
-    });
+    res.status(500).json({ success: false, error: error.message || 'Error interno' });
   } finally {
     if (tempImagePath && fs.existsSync(tempImagePath)) {
       fs.unlinkSync(tempImagePath);
     }
   }
 });
+
+function urgencyColor(level: string): string {
+  switch (level) {
+    case 'PELIGRO':  return '#ff0000';
+    case 'ATENCIÓN': return '#ff8c00';
+    case 'REVISAR':  return '#ffcc00';
+    default:         return '#00ff88';
+  }
+}
 
 export default router;
