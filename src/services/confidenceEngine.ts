@@ -16,17 +16,53 @@ export function calculateConfidence(
   ocrTextCount: number
 ): ConfidenceResult {
 
-  // El score ES el de Gemini directamente
-  let score = gemini.confidence;
+  const brand = gemini.brand || '';
+  const model = gemini.model || '';
 
-  // Bonus pequeño si hay info adicional verificada
-  if (wiki.found) score = Math.min(100, score + 3);
+  // Evaluar qué tan bien se identificó el objeto
+  const brandKnown =
+    brand !== '' &&
+    brand.toLowerCase() !== 'desconocida' &&
+    brand.toLowerCase() !== 'unknown';
 
-  // Bonus si OCR detectó texto
-  if (ocrTextCount > 0) score = Math.min(100, score + 2);
+  const modelKnown =
+    model !== '' &&
+    model.toLowerCase() !== 'no identificado' &&
+    model.toLowerCase() !== 'not identified';
+
+  const isSimilar =
+    brand.toLowerCase().includes('similar') ||
+    model.toLowerCase().includes('similar');
+
+  // ── Calcular score base desde los datos reales identificados ──────────────────
+  // No confiamos ciegamente en el número que Sol devuelve, porque a veces
+  // reporta 1% aunque haya identificado correctamente marca y modelo.
+  // Tomamos el MÁXIMO entre el score de Sol y el score que calculamos aquí.
+  let baseScore: number;
+
+  if (brandKnown && modelKnown && !isSimilar) {
+    baseScore = 82; // Marca Y modelo claramente identificados
+  } else if (brandKnown && modelKnown && isSimilar) {
+    baseScore = 63; // Identificado por similitud visual
+  } else if (brandKnown && !modelKnown) {
+    baseScore = 58; // Solo marca identificada
+  } else if (!brandKnown && modelKnown) {
+    baseScore = 52; // Solo modelo identificado
+  } else {
+    baseScore = 15; // Nada identificado con certeza
+  }
+
+  // Usar el mayor entre el score de Sol y el calculado
+  let score = Math.max(gemini.confidence || 0, baseScore);
+
+  // ── Bonificaciones adicionales ─────────────────────────────────────────────────
+  if (wiki.found)       score = Math.min(100, score + 5);
+  if (ocrTextCount > 3) score = Math.min(100, score + 8);
+  else if (ocrTextCount > 0) score = Math.min(100, score + 3);
 
   score = Math.round(score);
 
+  // ── Nivel y color según score final ───────────────────────────────────────────
   let level: ConfidenceResult['level'];
   let color: string;
   let message: string;
